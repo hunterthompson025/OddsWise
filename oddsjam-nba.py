@@ -19,14 +19,14 @@ from googleapiclient.errors import HttpError
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class CollegeBasketballPredictor:
+class NBAPredictor:
     def __init__(self, lookback_days: int = 30, prediction_type: str = 'total', 
                  spreadsheet_id: str = None, credentials_path: str = None):
         self.lookback_days = lookback_days
         self.prediction_type = prediction_type.lower()
         if self.prediction_type not in ['total', 'spread']:
             raise ValueError("prediction_type must be either 'total' or 'spread'")
-        self.base_url = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball"
+        self.base_url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"  # Changed to NBA endpoint
         self.spreadsheet_id = spreadsheet_id
         self.credentials_path = credentials_path
 
@@ -42,19 +42,17 @@ class CollegeBasketballPredictor:
                 scopes=['https://www.googleapis.com/auth/spreadsheets']
             )
             
-            service = build('sheets', 'v4', credentials=credentials)
+            # Disable cache discovery to prevent warning
+            service = build('sheets', 'v4', credentials=credentials, cache_discovery=False)
             
-            # Get today's date for the sheet name
-            today = datetime.now().strftime('%Y-%m-%d')
+            today = 'NBA_' + datetime.now().strftime('%Y-%m-%d')
             
             try:
-                # Try to get the sheet to see if it exists
                 service.spreadsheets().get(
                     spreadsheetId=self.spreadsheet_id,
                     ranges=today
                 ).execute()
             except HttpError:
-                # If sheet doesn't exist, create it
                 body = {
                     'requests': [{
                         'addSheet': {
@@ -69,7 +67,6 @@ class CollegeBasketballPredictor:
                     body=body
                 ).execute()
 
-            # Append the data
             body = {
                 'values': values
             }
@@ -87,9 +84,9 @@ class CollegeBasketballPredictor:
             logger.error(f"Error appending to Google Sheet: {str(e)}")
 
     def get_todays_games(self) -> List[Dict]:
-        """Fetch all college basketball games scheduled for today from ESPN API."""
+        """Fetch all NBA games scheduled for today from ESPN API."""
         try:
-            url = f"{self.base_url}/scoreboard?dates=20250224&groups=50"
+            url = f"{self.base_url}/scoreboard?dates=20250224"  # NBA scoreboard endpoint
             response = requests.get(url)
             response.raise_for_status()
             data = response.json()
@@ -162,7 +159,7 @@ class CollegeBasketballPredictor:
         for day_offset in range(days_back):
             date = (datetime.now() - timedelta(days=day_offset)).strftime('%Y%m%d')
             try:
-                url = f"{self.base_url}/scoreboard?dates={date}&groups=50"
+                url = f"{self.base_url}/scoreboard?dates={date}"  # NBA scoreboard with date
                 response = requests.get(url)
                 response.raise_for_status()
                 data = response.json()
@@ -432,9 +429,9 @@ class CollegeBasketballPredictor:
         self.append_to_google_sheet(sheet_rows)
 
     def get_completed_games_scores(self) -> List[Dict]:
-        """Fetch all completed college basketball games from today with their scores."""
+        """Fetch all completed NBA games from today with their scores."""
         try:
-            url = f"{self.base_url}/scoreboard?groups=50"  # Today's date by default
+            url = f"{self.base_url}/scoreboard"  # NBA scoreboard endpoint
             response = requests.get(url)
             response.raise_for_status()
             data = response.json()
@@ -506,7 +503,7 @@ def main():
         while prediction_type not in ['total', 'spread']:
             prediction_type = input("Invalid input. Please enter 'total' or 'spread': ").lower()
         
-        predictor = CollegeBasketballPredictor(
+        predictor = NBAPredictor(
             lookback_days=30,
             prediction_type=prediction_type,
             spreadsheet_id=spreadsheet_id if spreadsheet_id else None,
@@ -515,7 +512,7 @@ def main():
         predictor.predict_today_scores()
     
     else:  # outcomes
-        predictor = CollegeBasketballPredictor(
+        predictor = NBAPredictor(
             lookback_days=30,
             prediction_type='total',  # default value, won't be used for outcomes
             spreadsheet_id=spreadsheet_id if spreadsheet_id else None,
@@ -556,4 +553,4 @@ def main():
             predictor.append_to_google_sheet(results_rows)
 
 if __name__ == "__main__":
-    main()
+    main() 
