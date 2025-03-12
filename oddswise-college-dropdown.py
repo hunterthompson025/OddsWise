@@ -141,6 +141,64 @@ class CollegeBasketballPredictor:
                 
         return games
 
+    def get_head_to_head_games(self, team1_id: str, team2_id: str, season_start: str = None) -> List[Dict]:
+        """Get head-to-head games between two teams from the current season."""
+        if season_start is None:
+            # Default to August 1st of current year (or previous year if we're in early months)
+            current_year = datetime.now().year
+            if datetime.now().month < 8:
+                current_year -= 1
+            season_start = f"{current_year}0801"
+
+        games = []
+        current_date = datetime.now().strftime('%Y%m%d')
+        
+        try:
+            # Get all dates between season start and now
+            start_date = datetime.strptime(season_start, '%Y%m%d')
+            end_date = datetime.strptime(current_date, '%Y%m%d')
+            date_list = [(start_date + timedelta(days=x)).strftime('%Y%m%d') 
+                         for x in range((end_date - start_date).days + 1)]
+
+            for date in date_list:
+                url = f"{self.base_url}/scoreboard?dates={date}&groups=50"
+                response = requests.get(url)
+                response.raise_for_status()
+                data = response.json()
+                
+                for event in data.get('events', []):
+                    competition = event['competitions'][0]
+                    
+                    # Only include completed games
+                    if not competition['status']['type']['completed']:
+                        continue
+                    
+                    home_team = competition['competitors'][0]
+                    away_team = competition['competitors'][1]
+                    
+                    # Check if this game involves both teams
+                    if (home_team['team']['id'] in [team1_id, team2_id] and 
+                        away_team['team']['id'] in [team1_id, team2_id]):
+                        try:
+                            game = {
+                                'date': date,
+                                'home_team': home_team['team']['displayName'],
+                                'away_team': away_team['team']['displayName'],
+                                'home_score': int(home_team['score']),
+                                'away_score': int(away_team['score']),
+                                'total_points': int(home_team['score']) + int(away_team['score'])
+                            }
+                            games.append(game)
+                        except (KeyError, ValueError):
+                            continue
+                
+                time.sleep(0.1)  # Small delay to avoid rate limiting
+                
+        except Exception as e:
+            logger.error(f"Error fetching head-to-head games: {str(e)}")
+        
+        return games
+
     def predict_game(self, game: Dict) -> Dict:
         """Predict the outcome for a specific game."""
         home_stats = self.get_team_stats(game['home_id'], self.lookback_days)
@@ -270,6 +328,22 @@ def main():
     if selected_game_data['over_under']:
         st.write(f"**Vegas Over/Under:** {selected_game_data['over_under']}")
     
+    # Display head-to-head matchups this season
+    st.subheader("Head-to-Head This Season")
+    h2h_games = predictor.get_head_to_head_games(
+        selected_game_data['home_id'],
+        selected_game_data['away_id']
+    )
+    
+    if h2h_games:
+        for game in h2h_games:
+            formatted_date = datetime.strptime(game['date'], '%Y%m%d').strftime('%m/%d/%Y')
+            st.write(f"**Previous Matchup ({formatted_date}):**")
+            st.write(f"{game['home_team']} {game['home_score']} - {game['away_score']} {game['away_team']}")
+            st.write(f"Total Points: {game['total_points']}")
+    else:
+        st.write("No previous matchups this season")
+
     # Display last 5 games for each team
     st.subheader("Recent Games")
     
@@ -281,21 +355,31 @@ def main():
     
     with col1:
         st.write(f"**{selected_game_data['home_team']} - Last 5 Games**")
+        home_totals = []
         for game in home_games:
             result = "W" if game['is_winner'] else "L"
             location = "Home" if game['is_home'] else "Away"
             total_points = game['points'] + game['opponent_points']
+            home_totals.append(total_points)
             formatted_date = datetime.strptime(game['date'], '%Y%m%d').strftime('%m/%d/%Y')
             st.write(f"{formatted_date}: {result} ({location}) - {game['points']}-{game['opponent_points']} (Total: {total_points})")
+        if home_totals:
+            avg_total = sum(home_totals) / len(home_totals)
+            st.write(f"**Average Total Points: {avg_total:.1f}**")
     
     with col2:
         st.write(f"**{selected_game_data['away_team']} - Last 5 Games**")
+        away_totals = []
         for game in away_games:
             result = "W" if game['is_winner'] else "L"
             location = "Home" if game['is_home'] else "Away"
             total_points = game['points'] + game['opponent_points']
+            away_totals.append(total_points)
             formatted_date = datetime.strptime(game['date'], '%Y%m%d').strftime('%m/%d/%Y')
             st.write(f"{formatted_date}: {result} ({location}) - {game['points']}-{game['opponent_points']} (Total: {total_points})")
+        if away_totals:
+            avg_total = sum(away_totals) / len(away_totals)
+            st.write(f"**Average Total Points: {avg_total:.1f}**")
 
     # Get prediction
     prediction = predictor.predict_game(selected_game_data)
